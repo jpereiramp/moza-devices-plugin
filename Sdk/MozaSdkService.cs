@@ -7,16 +7,12 @@ using System.Threading;
 using MozaDevicesPlugin.Models;
 using MozaApi = mozaAPI.mozaAPI;
 using MozaErrorCode = mozaAPI.ERRORCODE;
-using MozaHidData = mozaAPI.HIDData;
 using MozaProductType = mozaAPI.PRODUCTTYPE;
 
 namespace MozaDevicesPlugin.Sdk
 {
     internal sealed class MozaSdkService : IDisposable
     {
-        private const int HidPollIntervalMs = 20;
-        private const int DevicePollIntervalMs = 1000;
-
         private readonly DiagnosticsLog _log;
         private readonly AutoResetEvent _refreshRequested = new AutoResetEvent(false);
         private readonly object _lifecycleSync = new object();
@@ -28,7 +24,6 @@ namespace MozaDevicesPlugin.Sdk
         private MozaDeviceParentSnapshot _lastParents = MozaDeviceParentSnapshot.Empty;
         private MozaWheelSnapshot _lastWheel = MozaWheelSnapshot.Empty;
         private MozaSdkCallResult[] _lastDeviceCalls = new MozaSdkCallResult[0];
-        private readonly int[] _buttonPressCounts = new int[129];
         private bool _sdkInstalled;
         private bool _disposed;
         private long _pollCount;
@@ -45,14 +40,20 @@ namespace MozaDevicesPlugin.Sdk
 
         private delegate Dictionary<int, string> ScreenUiListGetter(ref MozaErrorCode error);
 
-        private delegate MozaHidData HidDataGetter(ref MozaErrorCode error);
-
         [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         private static extern bool SetDllDirectory(string? lpPathName);
 
         public MozaDeviceSnapshot Snapshot => _snapshot;
 
         public string LogText => _log.GetText();
+
+        public string HidPollingStatus
+        {
+            get
+            {
+                return "Permanently disabled; live wheel buttons are read through Windows DirectInput.";
+            }
+        }
 
         public void Start()
         {
@@ -129,20 +130,14 @@ namespace MozaDevicesPlugin.Sdk
         private void WorkerLoop(CancellationToken token)
         {
             TryInstallSdk();
-            DateTime nextDevicePollUtc = DateTime.MinValue;
+            PollOnce(pollDevices: true);
 
             while (!token.IsCancellationRequested)
             {
-                bool pollDevices = DateTime.UtcNow >= nextDevicePollUtc;
-                PollOnce(pollDevices);
-                if (pollDevices)
-                    nextDevicePollUtc = DateTime.UtcNow.AddMilliseconds(DevicePollIntervalMs);
-
                 int waitResult = WaitHandle.WaitAny(
-                    new[] { token.WaitHandle, _refreshRequested },
-                    HidPollIntervalMs);
+                    new[] { token.WaitHandle, _refreshRequested });
                 if (waitResult == 1)
-                    nextDevicePollUtc = DateTime.MinValue;
+                    PollOnce(pollDevices: true);
             }
 
             TryRemoveSdk();
@@ -252,9 +247,7 @@ namespace MozaDevicesPlugin.Sdk
                     calls.AddRange(_lastDeviceCalls);
                 }
 
-                MozaHidSnapshot hid = parents.AnyConnected
-                    ? PollHid(calls)
-                    : MozaHidSnapshot.Empty;
+                MozaHidSnapshot hid = CreateUnavailableHidSnapshot(HidPollingStatus);
 
                 _consecutiveFailures = 0;
                 string status = BuildStatus(parents, calls);
@@ -546,160 +539,24 @@ namespace MozaDevicesPlugin.Sdk
             }
         }
 
-        private MozaHidSnapshot PollHid(ICollection<MozaSdkCallResult> calls)
+        private static MozaHidSnapshot CreateUnavailableHidSnapshot(string errorCode)
         {
-            MozaErrorCode error = MozaErrorCode.NORMAL;
-            var sw = Stopwatch.StartNew();
-
-            try
-            {
-                MozaHidData data = ((HidDataGetter)MozaApi.getHIDData)(ref error);
-                sw.Stop();
-                bool hasButtonData = data.buttons != null && data.buttons.Length > 0;
-                bool usable = error == MozaErrorCode.NORMAL
-                    || (error == MozaErrorCode.COLLECTIONCYCLEDATALOSS && hasButtonData);
-                calls.Add(new MozaSdkCallResult(
-                    "getHIDData",
-                    error.ToString(),
-                    usable,
-                    sw.ElapsedMilliseconds,
-                    error == MozaErrorCode.COLLECTIONCYCLEDATALOSS && usable
-                        ? "usable data returned with cycle data loss"
-                        : "ok"));
-
-                if (!usable)
-                {
-                    return new MozaHidSnapshot(
-                        false,
-                        error.ToString(),
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        "",
-                        0,
-                        new int[0],
-                        new int[0],
-                        new Dictionary<int, int>());
-                }
-
-                int buttonCount = data.buttons?.Length ?? 0;
-                IReadOnlyList<int> pressedButtons = GetPressedButtons(data);
-                Dictionary<int, int> pressDeltas = GetButtonPressDeltas(data);
-                foreach (var kv in pressDeltas)
-                    _buttonPressCounts[kv.Key] = SafeAdd(_buttonPressCounts[kv.Key], kv.Value);
-
-                return new MozaHidSnapshot(
-                    true,
-                    error.ToString(),
-                    data.fSteeringWheelAngle,
-                    data.fSteeringWheelVelocity,
-                    data.fSteeringWheelAcceleration,
-                    data.steeringWheelAxle,
-                    data.throttle,
-                    data.brake,
-                    data.clutch,
-                    data.handbrake,
-                    data.shift.ToString(),
-                    buttonCount,
-                    pressedButtons,
-                    pressDeltas.Keys,
-                    GetButtonPressCounts());
-            }
-            catch (Exception ex)
-            {
-                sw.Stop();
-                calls.Add(new MozaSdkCallResult(
-                    "getHIDData",
-                    ex.GetType().Name,
-                    false,
-                    sw.ElapsedMilliseconds,
-                    ex.Message));
-                return new MozaHidSnapshot(
-                    false,
-                    ex.GetType().Name,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    "",
-                    0,
-                    new int[0],
-                    new int[0],
-                    new Dictionary<int, int>());
-            }
-        }
-
-        private static IReadOnlyList<int> GetPressedButtons(MozaHidData data)
-        {
-            var pressed = new List<int>();
-            if (data.buttons == null)
-                return pressed;
-
-            for (int i = 0; i < data.buttons.Length; i++)
-            {
-                try
-                {
-                    if (data.buttons[i].LastPressState())
-                        pressed.Add(i + 1);
-                }
-                catch
-                {
-                }
-            }
-
-            return pressed;
-        }
-
-        private static Dictionary<int, int> GetButtonPressDeltas(MozaHidData data)
-        {
-            var pressDeltas = new Dictionary<int, int>();
-            if (data.buttons == null)
-                return pressDeltas;
-
-            for (int i = 0; i < data.buttons.Length; i++)
-            {
-                try
-                {
-                    int count = data.buttons[i].PressNum();
-                    if (count > 0)
-                        pressDeltas[i + 1] = count;
-                }
-                catch
-                {
-                }
-            }
-
-            return pressDeltas;
-        }
-
-        private IReadOnlyDictionary<int, int> GetButtonPressCounts()
-        {
-            var counts = new Dictionary<int, int>();
-            for (int button = 1; button < _buttonPressCounts.Length; button++)
-            {
-                int count = _buttonPressCounts[button];
-                if (count > 0)
-                    counts[button] = count;
-            }
-
-            return counts;
-        }
-
-        private static int SafeAdd(int value, int delta)
-        {
-            if (delta <= 0)
-                return value;
-
-            return value > int.MaxValue - delta ? delta : value + delta;
+            return new MozaHidSnapshot(
+                false,
+                errorCode,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "",
+                0,
+                new int[0],
+                new int[0],
+                new Dictionary<int, int>());
         }
     }
 }

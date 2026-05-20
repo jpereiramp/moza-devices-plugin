@@ -169,44 +169,66 @@ namespace MozaDevicesPlugin.UI
         {
             MozaDeviceSnapshot snapshot = _plugin.Snapshot;
             _updatingControls = true;
-            EnableVJoySourceBridgeCheckBox.IsChecked = _plugin.Settings.EnableVJoySourceBridge;
-            UsePerWheelVJoySourceDevicesCheckBox.IsChecked = _plugin.Settings.UsePerWheelVJoySourceDevices;
-            VJoySourceIdComboBox.SelectedItem = _plugin.Settings.VJoySourceDeviceId;
-            CurrentWheelVJoyIdComboBox.SelectedItem = _plugin.CurrentWheelVJoySourceDeviceId;
-            CurrentWheelVJoyIdComboBox.IsEnabled = !string.IsNullOrWhiteSpace(snapshot.Parents.SteeringWheel) || snapshot.Hid.Available;
-            CurrentWheelAssignmentText.Text = _plugin.CurrentWheelVJoyAssignmentLabel;
-            RefreshWheelProfileControls();
-            _updatingControls = false;
+            try
+            {
+                RestartBanner.Visibility = _plugin.DeviceDefinitionDeployed
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+                SetTextIfChanged(
+                    RestartBannerText,
+                    string.IsNullOrWhiteSpace(_plugin.DeviceDefinitionStatus)
+                        ? "New MOZA SDK device definition was deployed. Restart SimHub to load it."
+                        : "New MOZA SDK device definition was deployed. Restart SimHub to load it. " + _plugin.DeviceDefinitionStatus);
 
-            RestartBanner.Visibility = _plugin.DeviceDefinitionDeployed
-                ? Visibility.Visible
-                : Visibility.Collapsed;
-            RestartBannerText.Text = string.IsNullOrWhiteSpace(_plugin.DeviceDefinitionStatus)
-                ? "New MOZA SDK device definition was deployed. Restart SimHub to load it."
-                : "New MOZA SDK device definition was deployed. Restart SimHub to load it. " + _plugin.DeviceDefinitionStatus;
+                SetTextIfChanged(ConnectionLabel, snapshot.Status);
+                SetTextIfChanged(
+                    SnapshotTimeLabel,
+                    snapshot.TimestampUtc == DateTime.MinValue
+                        ? ""
+                        : $"Updated {snapshot.TimestampUtc.ToLocalTime():HH:mm:ss}");
+                ConnectionIndicator.Fill = GetStatusBrush(snapshot);
 
-            ConnectionLabel.Text = snapshot.Status;
-            SnapshotTimeLabel.Text = snapshot.TimestampUtc == DateTime.MinValue
-                ? ""
-                : $"Updated {snapshot.TimestampUtc.ToLocalTime():HH:mm:ss}";
-            ConnectionIndicator.Fill = GetStatusBrush(snapshot);
+                switch (MainTabs.SelectedIndex)
+                {
+                    case 0:
+                        SetTextIfChanged(SetupStatusBox, _plugin.BuildSetupStatusText());
+                        break;
 
-            SetupStatusBox.Text = _plugin.BuildSetupStatusText();
-            CurrentWheelProfileText.Text = _plugin.CurrentWheelVJoyAssignmentLabel;
-            WheelProfilesBox.Text = _plugin.BuildWheelProfilesText();
-            WheelProfileWarningText.Text = _plugin.BuildWheelProfileWarningsText();
-            RefreshButtonTester(snapshot);
-            WheelDevicesBox.Text = BuildDevicesText(snapshot);
-            WheelInfoBox.Text = BuildWheelText(snapshot);
-            HidInfoBox.Text = BuildHidText(snapshot);
-            DiagnosticsBox.Text = BuildDiagnosticsText(
-                snapshot,
-                _plugin.BuildVirtualInputsText(),
-                _plugin.BuildControlMapperSourceText(),
-                _plugin.DeviceDefinitionDeployed,
-                _plugin.DeviceDefinitionStatus);
-            LogsBox.Text = _plugin.BuildFilteredLogText(GetSelectedLogFilter());
-            ButtonEventsBox.Text = _plugin.BuildRecentButtonEventsText();
+                    case 1:
+                        RefreshWheelProfileControls();
+                        SetTextIfChanged(CurrentWheelProfileText, _plugin.CurrentWheelVJoyAssignmentLabel);
+                        SetTextIfChanged(WheelProfilesBox, _plugin.BuildWheelProfilesText());
+                        SetTextIfChanged(WheelProfileWarningText, _plugin.BuildWheelProfileWarningsText());
+                        RefreshButtonTester(snapshot);
+                        SetTextIfChanged(WheelDevicesBox, BuildDevicesText(snapshot));
+                        SetTextIfChanged(WheelInfoBox, BuildWheelText(snapshot));
+                        SetTextIfChanged(HidInfoBox, BuildHidText(snapshot));
+                        break;
+
+                    case 2:
+                        EnableVJoySourceBridgeCheckBox.IsChecked = _plugin.Settings.EnableVJoySourceBridge;
+                        UsePerWheelVJoySourceDevicesCheckBox.IsChecked = _plugin.Settings.UsePerWheelVJoySourceDevices;
+                        VJoySourceIdComboBox.SelectedItem = _plugin.Settings.VJoySourceDeviceId;
+                        CurrentWheelVJoyIdComboBox.SelectedItem = _plugin.CurrentWheelVJoySourceDeviceId;
+                        CurrentWheelVJoyIdComboBox.IsEnabled = !string.IsNullOrWhiteSpace(snapshot.Parents.SteeringWheel);
+                        SetTextIfChanged(CurrentWheelAssignmentText, _plugin.CurrentWheelVJoyAssignmentLabel);
+                        SetTextIfChanged(
+                            DiagnosticsBox,
+                            BuildDiagnosticsText(
+                                snapshot,
+                                _plugin.BuildVirtualInputsText(),
+                                _plugin.BuildControlMapperSourceText(),
+                                _plugin.DeviceDefinitionDeployed,
+                                _plugin.DeviceDefinitionStatus));
+                        SetTextIfChanged(LogsBox, _plugin.BuildFilteredLogText(GetSelectedLogFilter()));
+                        SetTextIfChanged(ButtonEventsBox, _plugin.BuildRecentButtonEventsText());
+                        break;
+                }
+            }
+            finally
+            {
+                _updatingControls = false;
+            }
         }
 
         private void RefreshWheelProfileControls()
@@ -349,7 +371,8 @@ namespace MozaDevicesPlugin.UI
             var sb = new StringBuilder();
 
             sb.AppendLine($"Available:              {hid.Available}");
-            sb.AppendLine($"Error:                  {Blank(hid.ErrorCode)}");
+            sb.AppendLine("Source:                 Windows DirectInput");
+            sb.AppendLine($"Source detail:          {Blank(hid.ErrorCode)}");
             sb.AppendLine($"Steering angle:         {Format(hid.SteeringWheelAngle)}");
             sb.AppendLine($"Steering velocity:      {Format(hid.SteeringWheelVelocity)}");
             sb.AppendLine($"Steering acceleration:  {Format(hid.SteeringWheelAcceleration)}");
@@ -416,17 +439,31 @@ namespace MozaDevicesPlugin.UI
             try
             {
                 Clipboard.SetText(text ?? "");
-                CopyStatusText.Text = successMessage;
+                SetTextIfChanged(CopyStatusText, successMessage);
             }
             catch (Exception ex)
             {
-                CopyStatusText.Text = $"Copy failed: {ex.Message}";
+                SetTextIfChanged(CopyStatusText, $"Copy failed: {ex.Message}");
             }
         }
 
         private void TrySetStatus(string message)
         {
-            CopyStatusText.Text = message ?? "";
+            SetTextIfChanged(CopyStatusText, message);
+        }
+
+        private static void SetTextIfChanged(TextBlock textBlock, string text)
+        {
+            text = text ?? "";
+            if (!string.Equals(textBlock.Text, text, StringComparison.Ordinal))
+                textBlock.Text = text;
+        }
+
+        private static void SetTextIfChanged(TextBox textBox, string text)
+        {
+            text = text ?? "";
+            if (!string.Equals(textBox.Text, text, StringComparison.Ordinal))
+                textBox.Text = text;
         }
 
         private static void AppendDevice(StringBuilder sb, string label, string value)

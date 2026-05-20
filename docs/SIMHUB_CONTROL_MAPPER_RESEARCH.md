@@ -95,6 +95,13 @@ to broken plugins after updates.
 
 Keep the vJoy source bridge as the supported Control Mapper integration for now.
 
+Runtime note: do not inspect vJoy devices every frame. Repeated calls through
+`vJoyInterfaceWrap` status APIs, including `vJoyEnabled`, `isVJDExists`,
+`GetVJDStatus`, and `GetVJDButtonNumber`, have been observed to leak native
+handles in SimHub/x86 testing. The bridge should cache inspection, throttle
+failed acquire attempts, and avoid status checks after a source vJoy device has
+already been acquired.
+
 Next research step:
 
 - Prototype the private `IVariantProvider` injection behind an explicit

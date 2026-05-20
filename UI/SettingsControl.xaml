@@ -12,6 +12,8 @@
             <Setter Property="FontFamily" Value="Consolas"/>
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="IsReadOnly" Value="True"/>
+            <Setter Property="IsUndoEnabled" Value="False"/>
+            <Setter Property="UndoLimit" Value="0"/>
             <Setter Property="TextWrapping" Value="NoWrap"/>
             <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
             <Setter Property="HorizontalScrollBarVisibility" Value="Auto"/>
@@ -68,12 +70,12 @@
             </Grid>
         </Border>
 
-        <TabControl>
+        <TabControl x:Name="MainTabs">
             <TabItem Header="Setup">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="10">
                     <StackPanel>
                         <TextBlock Text="Setup Status" Style="{StaticResource SectionHeader}" Margin="0,0,0,8"/>
-                        <TextBlock Text="No serial/COM access is used. MOZA communication goes through the MOZA SDK."
+                        <TextBlock Text="No serial/COM access is used. MOZA identity uses the MOZA SDK; live buttons use Windows DirectInput."
                                    Foreground="#505050"
                                    Margin="0,0,0,8"
                                    TextWrapping="Wrap"/>
@@ -183,7 +185,7 @@
                                  Style="{StaticResource MonoBox}"
                                  MinHeight="220"/>
 
-                        <TextBlock Text="Live HID" Style="{StaticResource SectionHeader}"/>
+                        <TextBlock Text="Live DirectInput" Style="{StaticResource SectionHeader}"/>
                         <TextBox x:Name="HidInfoBox"
                                  Style="{StaticResource MonoBox}"
                                  MinHeight="180"/>

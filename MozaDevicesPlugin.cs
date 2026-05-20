@@ -15,7 +15,7 @@ using SimHub.Plugins;
 
 namespace MozaDevicesPlugin
 {
-    [PluginDescription("MOZA device integration for SimHub through the MOZA SDK and Pit House")]
+    [PluginDescription("MOZA device integration for SimHub through the MOZA SDK and DirectInput")]
     [PluginAuthor("joao")]
     [PluginName("MOZA Devices SDK")]
     public sealed class MozaDevicesPlugin : IPlugin, IDataPlugin, IWPFSettingsV2
@@ -24,6 +24,7 @@ namespace MozaDevicesPlugin
 
         private readonly DiagnosticsLog _log = new DiagnosticsLog();
         private readonly MozaSdkService _sdk;
+        private readonly DirectInputButtonReader _directInputButtons;
         private readonly VJoySourceBridge _vJoyBridge;
         private readonly object _inputSync = new object();
         private readonly object _buttonEventSync = new object();
@@ -35,6 +36,32 @@ namespace MozaDevicesPlugin
         private readonly Dictionary<string, int> _virtualInputPressCounts = new Dictionary<string, int>(StringComparer.Ordinal);
         private readonly Dictionary<int, int> _observedButtonEventCounts = new Dictionary<int, int>();
         private readonly Queue<string> _recentButtonEvents = new Queue<string>();
+        private static readonly string[] AttachedDelegateNames =
+        {
+            "MozaSdk.Status",
+            "MozaSdk.SdkInstalled",
+            "MozaSdk.AnyDeviceConnected",
+            "MozaSdk.Wheelbase",
+            "MozaSdk.SteeringWheel",
+            "MozaSdk.DisplayScreen",
+            "MozaSdk.Pedals",
+            "MozaSdk.Handbrake",
+            "MozaSdk.GearShifter",
+            "MozaSdk.WheelShiftIndicatorBrightness",
+            "MozaSdk.WheelScreenBrightness",
+            "MozaSdk.WheelScreenCurrentUi",
+            "MozaSdk.HidAvailable",
+            "MozaSdk.SteeringWheelAngle",
+            "MozaSdk.Throttle",
+            "MozaSdk.Brake",
+            "MozaSdk.Clutch",
+            "MozaSdk.HandbrakeAxis",
+            "MozaSdk.Shift",
+            "MozaSdk.ButtonCount",
+            "MozaSdk.PressedButtons",
+            "MozaSdk.PressEventButtons",
+            "MozaSdk.ButtonPressCounts"
+        };
         private PluginManager? _pluginManager;
         private string _activeVirtualInputDevice = "";
         private string _buttonEventWheelName = "";
@@ -44,10 +71,12 @@ namespace MozaDevicesPlugin
         private string _deviceDefinitionStatus = "";
         private SimHubControlMapperSettingsStatus? _controlMapperSettingsStatus;
         private DateTime _controlMapperSettingsReadUtc = DateTime.MinValue;
+        private volatile MozaDeviceSnapshot _runtimeSnapshot = MozaDeviceSnapshot.Empty;
 
         public MozaDevicesPlugin()
         {
             _sdk = new MozaSdkService(_log);
+            _directInputButtons = new DirectInputButtonReader(_log);
             _vJoyBridge = new VJoySourceBridge(_log);
         }
 
@@ -60,9 +89,13 @@ namespace MozaDevicesPlugin
 
         public string LeftMenuTitle => "MOZA SDK";
 
-        internal MozaDeviceSnapshot Snapshot => _sdk.Snapshot;
+        internal MozaDeviceSnapshot Snapshot => _runtimeSnapshot;
 
         internal string LogText => _sdk.LogText;
+
+        internal string HidPollingStatus => _sdk.HidPollingStatus;
+
+        internal string DirectInputStatus => _directInputButtons.StatusText;
 
         internal bool DeviceDefinitionDeployed => _deviceDefinitionDeployed;
 
@@ -107,6 +140,7 @@ namespace MozaDevicesPlugin
             NormalizeSettings();
             RegisterProperties();
             _sdk.Start();
+            _runtimeSnapshot = BuildRuntimeSnapshot(_sdk.Snapshot);
         }
 
         public void End(PluginManager pluginManager)
@@ -115,14 +149,17 @@ namespace MozaDevicesPlugin
             SaveSettings();
             _vJoyBridge.Release();
             ReleaseAllVirtualInputs(pluginManager);
+            DetachProperties(pluginManager);
+            _directInputButtons.Dispose();
             _sdk.Stop();
+            _pluginManager = null;
             if (ReferenceEquals(Instance, this))
                 Instance = null;
         }
 
         public void DataUpdate(PluginManager pluginManager, ref GameData data)
         {
-            MozaDeviceSnapshot snapshot = Snapshot;
+            MozaDeviceSnapshot snapshot = RefreshRuntimeSnapshot();
             DeployWheelDeviceDefinitionIfNeeded(snapshot);
             CaptureButtonEvents(snapshot);
             UpdateVirtualWheelInputs(pluginManager, snapshot);
@@ -134,7 +171,36 @@ namespace MozaDevicesPlugin
             return new SettingsControl(this);
         }
 
-        internal void RequestRefresh() => _sdk.RequestRefresh();
+        private MozaDeviceSnapshot RefreshRuntimeSnapshot()
+        {
+            MozaDeviceSnapshot snapshot = BuildRuntimeSnapshot(_sdk.Snapshot);
+            _runtimeSnapshot = snapshot;
+            return snapshot;
+        }
+
+        private MozaDeviceSnapshot BuildRuntimeSnapshot(MozaDeviceSnapshot sdkSnapshot)
+        {
+            MozaHidSnapshot directInput = _directInputButtons.Poll();
+            return new MozaDeviceSnapshot(
+                sdkSnapshot.SdkInstalled,
+                sdkSnapshot.PollActive,
+                sdkSnapshot.Status,
+                sdkSnapshot.LastError,
+                sdkSnapshot.PollCount,
+                sdkSnapshot.ConsecutiveFailures,
+                DateTime.UtcNow,
+                sdkSnapshot.Parents,
+                sdkSnapshot.Wheel,
+                directInput,
+                sdkSnapshot.Calls);
+        }
+
+        internal void RequestRefresh()
+        {
+            _sdk.RequestRefresh();
+            _directInputButtons.RequestRefresh();
+            _runtimeSnapshot = BuildRuntimeSnapshot(_sdk.Snapshot);
+        }
 
         internal void SetVJoySourceBridgeEnabled(bool enabled)
         {
@@ -283,7 +349,7 @@ namespace MozaDevicesPlugin
             lock (_inputSync)
             {
                 if (string.IsNullOrWhiteSpace(_activeVirtualInputDevice))
-                    return "(no active wheel HID input source)";
+                    return "(no active wheel DirectInput source)";
 
                 var sb = new StringBuilder();
                 sb.AppendLine($"Active source:       {_activeVirtualInputDevice}");
@@ -307,6 +373,8 @@ namespace MozaDevicesPlugin
             sb.AppendLine($"Fallback vJoy source ID:      {Settings.VJoySourceDeviceId}");
             sb.AppendLine($"Auto-select fallback ID:      {Settings.AutoSelectVJoySourceDevice}");
             sb.AppendLine($"Max bridged buttons:          {Settings.MaxVJoyButtons}");
+            sb.AppendLine($"MOZA SDK HID polling:         {HidPollingStatus}");
+            sb.AppendLine($"DirectInput button source:    {DirectInputStatus}");
             sb.AppendLine($"Current wheel:                {Blank(ResolveWheelInputDeviceName(Snapshot))}");
             sb.AppendLine($"Current wheel vJoy ID:        {ResolveWheelVJoyDeviceId(Snapshot, controlMapperSettings, createIfMissing: false)}");
             sb.AppendLine($"Bridge status:                {_vJoyBridge.StatusText}");
@@ -333,7 +401,7 @@ namespace MozaDevicesPlugin
             var sb = new StringBuilder();
 
             sb.AppendLine("First-run setup");
-            sb.AppendLine("No serial/COM access is used. All MOZA hardware communication goes through the MOZA SDK.");
+            sb.AppendLine("No serial/COM access is used. MOZA identity/configuration uses the MOZA SDK; live buttons use Windows DirectInput.");
             sb.AppendLine();
 
             string[] missingMozaDlls = GetMissingMozaRuntimeDlls();
@@ -383,6 +451,18 @@ namespace MozaDevicesPlugin
                 Settings.EnableVJoySourceBridge
                     ? "Enabled."
                     : "Disabled. Enable it if you want Control Mapper source-controller support.");
+
+            AppendSetupLine(
+                sb,
+                "OK",
+                "MOZA SDK HID polling",
+                "Permanently disabled. The plugin does not call getHIDData or getHIDData_C.");
+
+            AppendSetupLine(
+                sb,
+                snapshot.Hid.Available ? "OK" : "WAIT",
+                "DirectInput button source",
+                snapshot.Hid.Available ? DirectInputStatus : $"{DirectInputStatus} Seen devices: {_directInputButtons.DeviceSummary.Replace(Environment.NewLine, " ")}");
 
             AppendSetupLine(
                 sb,
@@ -484,7 +564,7 @@ namespace MozaDevicesPlugin
             sb.AppendLine("MOZA Devices SDK diagnostics");
             sb.AppendLine($"Generated local: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
             sb.AppendLine($"Generated UTC:   {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}Z");
-            sb.AppendLine("No serial/COM access is used; MOZA access goes through the MOZA SDK.");
+            sb.AppendLine("No serial/COM access is used; MOZA identity/configuration uses the MOZA SDK and live buttons use Windows DirectInput.");
             sb.AppendLine();
 
             sb.AppendLine("=== SDK ===");
@@ -493,6 +573,8 @@ namespace MozaDevicesPlugin
             sb.AppendLine($"Poll active:          {snapshot.PollActive}");
             sb.AppendLine($"Poll count:           {snapshot.PollCount}");
             sb.AppendLine($"Consecutive failures: {snapshot.ConsecutiveFailures}");
+            sb.AppendLine($"SDK HID polling:      {HidPollingStatus}");
+            sb.AppendLine($"DirectInput buttons:  {DirectInputStatus}");
             sb.AppendLine($"Snapshot UTC:         {FormatUtc(snapshot.TimestampUtc)}");
             sb.AppendLine($"Last error:           {Blank(snapshot.LastError)}");
             sb.AppendLine();
@@ -541,7 +623,9 @@ namespace MozaDevicesPlugin
 
             sb.AppendLine("=== HID ===");
             sb.AppendLine($"Available:              {snapshot.Hid.Available}");
-            sb.AppendLine($"HID error:              {Blank(snapshot.Hid.ErrorCode)}");
+            sb.AppendLine($"Source:                 Windows DirectInput");
+            sb.AppendLine($"Source status:          {DirectInputStatus}");
+            sb.AppendLine($"Source detail:          {Blank(snapshot.Hid.ErrorCode)}");
             sb.AppendLine($"Steering angle:         {Format(snapshot.Hid.SteeringWheelAngle)}");
             sb.AppendLine($"Steering velocity:      {Format(snapshot.Hid.SteeringWheelVelocity)}");
             sb.AppendLine($"Steering acceleration:  {Format(snapshot.Hid.SteeringWheelAcceleration)}");
@@ -555,6 +639,8 @@ namespace MozaDevicesPlugin
             sb.AppendLine($"Pressed buttons:        {PressedButtons(snapshot)}");
             sb.AppendLine($"Recent press events:    {PressEventButtons(snapshot)}");
             sb.AppendLine($"Press counters:         {ButtonPressCounts(snapshot)}");
+            sb.AppendLine("DirectInput devices:");
+            sb.AppendLine(_directInputButtons.DeviceSummary);
             sb.AppendLine();
 
             sb.AppendLine("=== Control Mapper virtual inputs ===");
@@ -668,6 +754,20 @@ namespace MozaDevicesPlugin
             this.AttachDelegate("MozaSdk.PressedButtons", () => PressedButtons(Snapshot));
             this.AttachDelegate("MozaSdk.PressEventButtons", () => PressEventButtons(Snapshot));
             this.AttachDelegate("MozaSdk.ButtonPressCounts", () => ButtonPressCounts(Snapshot));
+        }
+
+        private void DetachProperties(PluginManager pluginManager)
+        {
+            foreach (string name in AttachedDelegateNames)
+            {
+                try
+                {
+                    pluginManager.DetachDelegate(name, GetType());
+                }
+                catch
+                {
+                }
+            }
         }
 
         private void SaveSettings()
@@ -857,9 +957,6 @@ namespace MozaDevicesPlugin
             if (!string.IsNullOrWhiteSpace(snapshot.Parents.SteeringWheel))
                 return NormalizeInputDeviceName(snapshot.Parents.SteeringWheel);
 
-            if (snapshot.Hid.Available)
-                return "Unknown Wheel";
-
             return "";
         }
 
@@ -948,9 +1045,7 @@ namespace MozaDevicesPlugin
 
         private int ChooseNextWheelVJoyDeviceId(string wheelName, SimHubControlMapperSettingsStatus controlMapperSettings)
         {
-            int excludedOutputId = controlMapperSettings.IsVJoyOutputMode
-                ? controlMapperSettings.OutputVJoyDeviceId
-                : 0;
+            int excludedOutputId = ResolveReservedOutputVJoyDeviceId(controlMapperSettings);
             var usedIds = new HashSet<int>(
                 Settings.WheelVJoyAssignments
                     .Where(i => !string.Equals(NormalizeInputDeviceName(i.WheelName), wheelName, StringComparison.OrdinalIgnoreCase))
@@ -978,6 +1073,14 @@ namespace MozaDevicesPlugin
             }
 
             return Clamp(Settings.VJoySourceDeviceId, 1, 16);
+        }
+
+        private static int ResolveReservedOutputVJoyDeviceId(SimHubControlMapperSettingsStatus controlMapperSettings)
+        {
+            if (controlMapperSettings.IsVJoyOutputMode && controlMapperSettings.OutputVJoyDeviceId > 0)
+                return Clamp(controlMapperSettings.OutputVJoyDeviceId, 1, 16);
+
+            return controlMapperSettings.Available ? 0 : 1;
         }
 
         private string BuildWheelVJoyAssignmentsText()

@@ -61,6 +61,8 @@ namespace MozaDevicesPlugin.Devices
     internal sealed class VJoySourceBridge : IDisposable
     {
         private const int SyntheticPressPulseMs = 50;
+        private static readonly TimeSpan InspectionCacheDuration = TimeSpan.FromSeconds(10);
+        private static readonly TimeSpan AcquireRetryDelay = TimeSpan.FromSeconds(5);
 
         private readonly DiagnosticsLog _log;
         private readonly object _sync = new object();
@@ -73,6 +75,10 @@ namespace MozaDevicesPlugin.Devices
         private int[] _observedPressCounts = Array.Empty<int>();
         private bool _pressCountBaselineInitialized;
         private string _status = "Not initialized.";
+        private VJoyEnvironmentStatus? _lastInspection;
+        private string _lastInspectionKey = "";
+        private DateTime _lastInspectionUtc = DateTime.MinValue;
+        private DateTime _nextAcquireAttemptUtc = DateTime.MinValue;
         private bool _disposed;
 
         public VJoySourceBridge(DiagnosticsLog log)
@@ -121,16 +127,31 @@ namespace MozaDevicesPlugin.Devices
                 if (!snapshot.Hid.Available || string.IsNullOrWhiteSpace(sourceName) || requestedButtonCount <= 0)
                 {
                     ReleaseActiveDevice();
-                    SetStatus("Waiting: no MOZA SDK HID buttons are available.");
+                    SetStatus("Waiting: no MOZA DirectInput buttons are available.");
                     return;
                 }
 
-                if (!EnsureLoaded())
+                if (_activeDeviceId != 0
+                    && string.Equals(_activeSourceName, sourceName, StringComparison.Ordinal))
+                {
+                    DriveButtons(snapshot, requestedButtonCount, pluginSettings.MaxVJoyButtons);
                     return;
+                }
+
+                DateTime nowUtc = DateTime.UtcNow;
+                if (nowUtc < _nextAcquireAttemptUtc)
+                    return;
+
+                if (!EnsureLoaded())
+                {
+                    DelayNextAcquireAttempt();
+                    return;
+                }
 
                 if (!InvokeBoolean("vJoyEnabled"))
                 {
                     ReleaseActiveDevice();
+                    DelayNextAcquireAttempt();
                     SetStatus("Waiting: vJoy driver is not enabled or no vJoy device is configured.");
                     return;
                 }
@@ -145,6 +166,7 @@ namespace MozaDevicesPlugin.Devices
                 if (targetDeviceId == 0)
                 {
                     ReleaseActiveDevice();
+                    DelayNextAcquireAttempt();
                     SetStatus(resolveMessage);
                     return;
                 }
@@ -154,6 +176,7 @@ namespace MozaDevicesPlugin.Devices
                     ReleaseActiveDevice();
                     if (!AcquireDevice(targetDeviceId, sourceName, out string acquireMessage))
                     {
+                        DelayNextAcquireAttempt();
                         SetStatus(acquireMessage);
                         return;
                     }
@@ -168,6 +191,8 @@ namespace MozaDevicesPlugin.Devices
             lock (_sync)
             {
                 ReleaseActiveDevice();
+                InvalidateInspectionCache();
+                _nextAcquireAttemptUtc = DateTime.MinValue;
                 SetStatus("Released.");
             }
         }
@@ -176,49 +201,58 @@ namespace MozaDevicesPlugin.Devices
         {
             lock (_sync)
             {
+                string inspectionKey = BuildInspectionKey(deviceIds);
+                DateTime nowUtc = DateTime.UtcNow;
+                if (_lastInspection != null
+                    && string.Equals(_lastInspectionKey, inspectionKey, StringComparison.Ordinal)
+                    && nowUtc - _lastInspectionUtc < InspectionCacheDuration)
+                {
+                    return _lastInspection;
+                }
+
                 string wrapperPath = FindVJoyWrapperPath();
                 if (string.IsNullOrWhiteSpace(wrapperPath))
                 {
-                    return new VJoyEnvironmentStatus(
+                    return CacheInspection(inspectionKey, nowUtc, new VJoyEnvironmentStatus(
                         wrapperFound: false,
                         wrapperPath: "",
                         driverEnabled: false,
                         error: "vJoyInterfaceWrap.dll was not found in the SimHub folder.",
-                        devices: Array.Empty<VJoyDeviceInspection>());
+                        devices: Array.Empty<VJoyDeviceInspection>()));
                 }
 
                 if (!EnsureLoaded())
                 {
-                    return new VJoyEnvironmentStatus(
+                    return CacheInspection(inspectionKey, nowUtc, new VJoyEnvironmentStatus(
                         wrapperFound: true,
                         wrapperPath: wrapperPath,
                         driverEnabled: false,
                         error: StatusText,
-                        devices: Array.Empty<VJoyDeviceInspection>());
+                        devices: Array.Empty<VJoyDeviceInspection>()));
                 }
 
                 try
                 {
                     bool driverEnabled = InvokeBoolean("vJoyEnabled");
                     var devices = new List<VJoyDeviceInspection>();
-                    foreach (int id in deviceIds.Where(i => i >= 1 && i <= 16).Distinct().OrderBy(i => i))
+                    foreach (int id in ParseInspectionKey(inspectionKey))
                         devices.Add(InspectDevice(id));
 
-                    return new VJoyEnvironmentStatus(
+                    return CacheInspection(inspectionKey, nowUtc, new VJoyEnvironmentStatus(
                         wrapperFound: true,
                         wrapperPath: wrapperPath,
                         driverEnabled: driverEnabled,
                         error: driverEnabled ? "" : "vJoy driver is not enabled or no vJoy device is configured.",
-                        devices: devices);
+                        devices: devices));
                 }
                 catch (Exception ex)
                 {
-                    return new VJoyEnvironmentStatus(
+                    return CacheInspection(inspectionKey, nowUtc, new VJoyEnvironmentStatus(
                         wrapperFound: true,
                         wrapperPath: wrapperPath,
                         driverEnabled: false,
                         error: ex.GetType().Name + ": " + ex.Message,
-                        devices: Array.Empty<VJoyDeviceInspection>());
+                        devices: Array.Empty<VJoyDeviceInspection>()));
                 }
             }
         }
@@ -232,6 +266,43 @@ namespace MozaDevicesPlugin.Devices
 
                 ReleaseActiveDevice();
                 _disposed = true;
+            }
+        }
+
+        private VJoyEnvironmentStatus CacheInspection(string key, DateTime timestampUtc, VJoyEnvironmentStatus status)
+        {
+            _lastInspectionKey = key;
+            _lastInspectionUtc = timestampUtc;
+            _lastInspection = status;
+            return status;
+        }
+
+        private void InvalidateInspectionCache()
+        {
+            _lastInspection = null;
+            _lastInspectionKey = "";
+            _lastInspectionUtc = DateTime.MinValue;
+        }
+
+        private void DelayNextAcquireAttempt()
+        {
+            _nextAcquireAttemptUtc = DateTime.UtcNow.Add(AcquireRetryDelay);
+        }
+
+        private static string BuildInspectionKey(IEnumerable<int> deviceIds)
+        {
+            return string.Join(",", deviceIds.Where(i => i >= 1 && i <= 16).Distinct().OrderBy(i => i));
+        }
+
+        private static IEnumerable<int> ParseInspectionKey(string key)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                yield break;
+
+            foreach (string part in key.Split(','))
+            {
+                if (int.TryParse(part, out int id) && id >= 1 && id <= 16)
+                    yield return id;
             }
         }
 
@@ -298,13 +369,13 @@ namespace MozaDevicesPlugin.Devices
         {
             int preferred = Clamp(targetVJoyDeviceId > 0 ? targetVJoyDeviceId : pluginSettings.VJoySourceDeviceId, 1, 16);
             bool exactTarget = pluginSettings.UsePerWheelVJoySourceDevices && targetVJoyDeviceId > 0;
-            int excludedOutputId = controlMapperSettings.IsVJoyOutputMode
-                ? controlMapperSettings.OutputVJoyDeviceId
-                : 0;
+            int excludedOutputId = ResolveReservedOutputVJoyDeviceId(controlMapperSettings);
 
             if (preferred == excludedOutputId)
             {
-                message = $"Waiting: vJoy device {preferred} is assigned to this MOZA wheel but is reserved by SimHub Control Mapper output.";
+                message = controlMapperSettings.Available
+                    ? $"Waiting: vJoy device {preferred} is assigned to this MOZA wheel but is reserved by SimHub Control Mapper output."
+                    : $"Waiting: vJoy device {preferred} is reserved until SimHub Control Mapper settings can be read.";
                 return 0;
             }
 
@@ -376,6 +447,14 @@ namespace MozaDevicesPlugin.Devices
             }
 
             return 0;
+        }
+
+        private static int ResolveReservedOutputVJoyDeviceId(SimHubControlMapperSettingsStatus controlMapperSettings)
+        {
+            if (controlMapperSettings.IsVJoyOutputMode && controlMapperSettings.OutputVJoyDeviceId > 0)
+                return Clamp(controlMapperSettings.OutputVJoyDeviceId, 1, 16);
+
+            return controlMapperSettings.Available ? 0 : 1;
         }
 
         private bool IsDeviceCandidateUsable(uint deviceId, int requestedButtonCount, bool requireEnoughButtons, out string detail)

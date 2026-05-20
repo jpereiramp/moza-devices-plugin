@@ -6,8 +6,8 @@ This is a C# `net48` SimHub plugin for MOZA devices. The entry point is
 `MozaDevicesPlugin.cs`. Core code is grouped by responsibility:
 
 - `Devices/`: SimHub device definitions, extension filters, deployment,
-  identity checks, and vJoy bridging.
-- `Sdk/`: MOZA SDK polling and integration service.
+  identity checks, DirectInput button reading, and vJoy bridging.
+- `Sdk/`: MOZA SDK identity/configuration integration service.
 - `Models/`: settings, immutable snapshots, diagnostics, and wheel catalogs.
 - `UI/`: WPF XAML controls and code-behind for plugin and device pages.
 - `docs/`: architecture notes and Control Mapper research.
@@ -40,7 +40,9 @@ that match SimHub or MOZA SDK terms.
 There is no automated test project yet. Validate changes with `make build` at
 minimum. For runtime behavior, deploy to SimHub, restart SimHub, start MOZA Pit
 House, and verify the Wheel and Diagnostics tabs, generated device definitions,
-connection status, and relevant vJoy bridge behavior.
+connection status, DirectInput button state, and relevant vJoy bridge behavior.
+When validating leak fixes, sample SimHub handle count and private memory for at
+least two minutes.
 
 ## Commit & Pull Request Guidelines
 
@@ -51,7 +53,9 @@ steps, linked issues when applicable, and screenshots for UI changes.
 
 ## Architecture & Dependency Rules
 
-All MOZA hardware communication must go through the MOZA SDK. Do not add direct
-COM-port, serial-protocol, or USB-probing code. Generated SimHub device behavior
+Do not add direct COM-port, serial-protocol, USB probing, or vendor HID/control
+endpoint code. MOZA identity and configuration should come through the MOZA SDK.
+Live wheel button input is intentionally read from Windows DirectInput because
+MOZA SDK HID polling is disabled for stability. Generated SimHub device behavior
 must remain scoped to MOZA SDK wheel definitions only. Do not commit SimHub
 assemblies, MOZA SDK binaries, extracted SDK docs, or build outputs.

@@ -37,6 +37,8 @@ namespace MozaDevicesPlugin.UI
             _details = new TextBox
             {
                 IsReadOnly = true,
+                IsUndoEnabled = false,
+                UndoLimit = 0,
                 BorderThickness = new Thickness(1),
                 FontFamily = new FontFamily("Consolas"),
                 FontSize = 12,
@@ -69,8 +71,22 @@ namespace MozaDevicesPlugin.UI
                 ? _extension.ExpectedPrefix
                 : _extension.ExpectedFriendlyName;
 
-            _title.Text = "MOZA SDK - " + (string.IsNullOrWhiteSpace(expected) ? "Wheel" : expected);
-            _details.Text = _extension.BuildDeviceStatusText();
+            SetTextIfChanged(_title, "MOZA SDK - " + (string.IsNullOrWhiteSpace(expected) ? "Wheel" : expected));
+            SetTextIfChanged(_details, _extension.BuildDeviceStatusText());
+        }
+
+        private static void SetTextIfChanged(TextBlock textBlock, string text)
+        {
+            text = text ?? "";
+            if (!string.Equals(textBlock.Text, text, StringComparison.Ordinal))
+                textBlock.Text = text;
+        }
+
+        private static void SetTextIfChanged(TextBox textBox, string text)
+        {
+            text = text ?? "";
+            if (!string.Equals(textBox.Text, text, StringComparison.Ordinal))
+                textBox.Text = text;
         }
     }
 }

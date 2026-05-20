@@ -3,13 +3,18 @@
 SimHub plugin for MOZA wheels and devices using the official MOZA SDK.
 
 The plugin is built around one important rule: it does not open COM ports and it
-does not speak MOZA serial protocols directly. All MOZA communication goes
-through the MOZA SDK, so MOZA Pit House can remain the owner of the hardware
-connection.
+does not speak MOZA serial protocols directly. MOZA identity and configuration
+come from the MOZA SDK, while live button input is read from the normal Windows
+DirectInput game-controller interface so MOZA Pit House can remain the owner of
+the hardware connection.
+
+MOZA SDK HID polling is intentionally disabled. The plugin must not call
+`getHIDData` or `getHIDData_C` during normal runtime.
 
 ## What It Does
 
-- Detects MOZA devices reported by the MOZA SDK and Pit House.
+- Detects MOZA devices reported by the MOZA SDK and Pit House at startup and
+  when refreshed.
 - Creates SimHub user device definitions for detected MOZA wheels, such as
   `MOZA SDK W17` and `MOZA SDK W18`.
 - Adds a MOZA SDK page to those generated wheel devices only.
@@ -20,7 +25,7 @@ connection.
 - Supports per-wheel vJoy assignments so different wheels can have different
   SimHub Control Mapper layouts.
 - Provides Wheel and Diagnostics tabs inside the plugin for SDK state, detected
-  devices, HID/button data, vJoy bridge status, and copyable debug logs.
+  devices, DirectInput button data, vJoy bridge status, and copyable debug logs.
 
 ## Current Limitations
 
@@ -28,8 +33,13 @@ connection.
   systems. The generated wheel device pages do not automatically appear as
   source controllers.
 - Control Mapper input currently uses the vJoy source bridge.
-- Button state is polled from the MOZA SDK. The plugin polls HID data every
-  20 ms and uses SDK press counters to avoid losing short taps between samples.
+- Button state is read from Windows DirectInput instead of MOZA SDK HID APIs.
+  The plugin maintains press counters locally to avoid losing short taps between
+  samples.
+- vJoy status APIs are cached/throttled because repeated status inspection can
+  leak native handles through the vJoy wrapper.
+- Wheel identity is captured from the MOZA SDK at startup and manual refresh.
+  Use Refresh in the plugin settings after swapping rims while SimHub is running.
 - Fine-grained wheel LED control is not exposed. SimHub LED pages are disabled
   for generated MOZA SDK wheel definitions.
 
@@ -86,6 +96,8 @@ bin\x86\Release\MozaDevicesPlugin.dll
 bin\x86\Release\MOZA_API_CSharp.dll
 bin\x86\Release\MOZA_API_C.dll
 bin\x86\Release\MOZA_SDK.dll
+bin\x86\Release\SharpDX.dll
+bin\x86\Release\SharpDX.DirectInput.dll
 ```
 
 ## Deploy to SimHub
@@ -112,6 +124,7 @@ Restart SimHub after deployment.
 4. Confirm the Wheel and Diagnostics tabs show SDK connection data.
 5. Let the plugin create/update the current wheel device definition.
 6. Restart SimHub so the new device definition appears in Devices.
+7. Confirm the Wheel tab shows live DirectInput button state.
 
 For Control Mapper, configure vJoy and enable the plugin's vJoy source bridge.
 Use one vJoy device per wheel layout when you want separate mappings for
@@ -125,7 +138,9 @@ Control Mapper native-integration research is in
 
 Important boundaries:
 
-- MOZA hardware access must stay behind the MOZA SDK.
+- Do not open MOZA COM ports, serial protocols, or vendor HID/control endpoints.
+- MOZA identity/configuration should stay behind the MOZA SDK.
+- Live button input is read through Windows DirectInput.
 - Generated SimHub device pages must be scoped to MOZA SDK wheel definitions
   only.
 - Non-MOZA devices must not receive MOZA tabs, status changes, or extensions.
@@ -135,9 +150,9 @@ Important boundaries:
 ## Repository Layout
 
 ```text
-Devices/      SimHub device definitions, extensions, identity, vJoy bridge
+Devices/      SimHub device definitions, extensions, DirectInput, vJoy bridge
 Models/       Immutable snapshots, settings models, wheel catalog
-Sdk/          MOZA SDK polling service
+Sdk/          MOZA SDK identity/configuration service
 UI/           WPF controls for plugin and generated device pages
 docs/         Architecture and implementation notes
 libs/         Local dependency cache, ignored except README

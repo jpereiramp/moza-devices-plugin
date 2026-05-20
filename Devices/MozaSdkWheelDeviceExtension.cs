@@ -135,7 +135,7 @@ namespace MozaDevicesPlugin.Devices
             sb.AppendLine($"Knobs:                  {expected.KnobCount}");
             sb.AppendLine($"Integrated display:     {expected.HasDisplay}");
             sb.AppendLine();
-            sb.AppendLine("SDK HID:");
+            sb.AppendLine("DirectInput buttons:");
             sb.AppendLine($"Available:              {snapshot.Hid.Available}");
             sb.AppendLine($"Button count:           {snapshot.Hid.ButtonCount}");
             sb.AppendLine($"Held buttons:           {FormatList(snapshot.Hid.PressedButtons)}");

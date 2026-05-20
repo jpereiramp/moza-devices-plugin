@@ -67,6 +67,7 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
     </PackageReference>
+    <PackageReference Include="SharpDX.DirectInput" Version="4.2.0" />
   </ItemGroup>
 
   <Target Name="CopyToSimHub" AfterTargets="Build" Condition="'$(SIMHUB_PATH)' != ''">
@@ -75,6 +76,8 @@
       <MozaDeployFiles Include="$(OutputPath)MOZA_API_CSharp.dll" />
       <MozaDeployFiles Include="$(OutputPath)MOZA_API_C.dll" />
       <MozaDeployFiles Include="$(OutputPath)MOZA_SDK.dll" />
+      <MozaDeployFiles Include="$(OutputPath)SharpDX.dll" Condition="Exists('$(OutputPath)SharpDX.dll') and !Exists('$(SIMHUB_PATH)\SharpDX.dll')" />
+      <MozaDeployFiles Include="$(OutputPath)SharpDX.DirectInput.dll" Condition="Exists('$(OutputPath)SharpDX.DirectInput.dll') and !Exists('$(SIMHUB_PATH)\SharpDX.DirectInput.dll')" />
     </ItemGroup>
     <Copy SourceFiles="@(MozaDeployFiles)" DestinationFolder="$(SIMHUB_PATH)" SkipUnchangedFiles="true" />
   </Target>

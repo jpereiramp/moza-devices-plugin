@@ -14,3 +14,5 @@ The plugin builds against assemblies that must be supplied from local installs:
 
 Use `scripts/Prepare-Dependencies.ps1` or `make deps` to copy these files into
 place. The actual DLLs are ignored by git because they are third-party binaries.
+
+SharpDX and SharpDX.DirectInput are restored from NuGet, not stored in `libs/`.
