@@ -1,0 +1,279 @@
+<UserControl x:Class="MozaDevicesPlugin.UI.SettingsControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Padding="10">
+    <UserControl.Resources>
+        <Style x:Key="SectionHeader" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,18,0,8"/>
+        </Style>
+        <Style x:Key="MonoBox" TargetType="TextBox">
+            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="IsReadOnly" Value="True"/>
+            <Setter Property="TextWrapping" Value="NoWrap"/>
+            <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
+            <Setter Property="HorizontalScrollBarVisibility" Value="Auto"/>
+            <Setter Property="BorderBrush" Value="#D0D0D0"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8"/>
+        </Style>
+        <Style x:Key="ConnectionDot" TargetType="Ellipse">
+            <Setter Property="Width" Value="12"/>
+            <Setter Property="Height" Value="12"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="0,0,8,0"/>
+        </Style>
+    </UserControl.Resources>
+
+    <DockPanel>
+        <Border x:Name="RestartBanner"
+                DockPanel.Dock="Top"
+                Visibility="Collapsed"
+                Background="#FFF3CD"
+                BorderBrush="#FFCD39"
+                BorderThickness="1"
+                CornerRadius="4"
+                Padding="10,8"
+                Margin="0,0,0,8">
+            <TextBlock x:Name="RestartBannerText"
+                       Foreground="#664D03"
+                       TextWrapping="Wrap"/>
+        </Border>
+
+        <Border DockPanel.Dock="Top"
+                BorderBrush="#D0D0D0"
+                BorderThickness="0,0,0,1"
+                Padding="0,0,0,10"
+                Margin="0,0,0,8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Ellipse x:Name="ConnectionIndicator" Style="{StaticResource ConnectionDot}" Fill="Gray"/>
+                    <TextBlock x:Name="ConnectionLabel" Text="Not started" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="SnapshotTimeLabel" Text="" Margin="16,0,0,0"
+                               Foreground="Gray" VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <TextBlock x:Name="CopyStatusText" Foreground="Gray" VerticalAlignment="Center"
+                               Margin="0,0,10,0"/>
+                    <Button Content="Refresh" Padding="14,5" Click="RefreshButton_Click"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <TabControl>
+            <TabItem Header="Setup">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="10">
+                    <StackPanel>
+                        <TextBlock Text="Setup Status" Style="{StaticResource SectionHeader}" Margin="0,0,0,8"/>
+                        <TextBlock Text="No serial/COM access is used. MOZA communication goes through the MOZA SDK."
+                                   Foreground="#505050"
+                                   Margin="0,0,0,8"
+                                   TextWrapping="Wrap"/>
+                        <TextBox x:Name="SetupStatusBox"
+                                 Style="{StaticResource MonoBox}"
+                                 MinHeight="260"/>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                            <Button Content="Refresh" Padding="14,5" Click="RefreshButton_Click"/>
+                            <Button Content="Copy support bundle" Padding="14,5" Margin="8,0,0,0"
+                                    Click="CopySupportBundleButton_Click"/>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Wheel">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="10">
+                    <StackPanel>
+                        <TextBlock Text="Wheel Profiles" Style="{StaticResource SectionHeader}" Margin="0,0,0,8"/>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="220"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="72"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <Button x:Name="RegisterCurrentWheelButton"
+                                    Grid.Column="0"
+                                    Grid.Row="0"
+                                    Content="Register current wheel"
+                                    Padding="14,5"
+                                    Click="RegisterCurrentWheelButton_Click"/>
+                            <TextBlock x:Name="CurrentWheelProfileText"
+                                       Grid.Column="1"
+                                       Grid.Row="0"
+                                       Grid.ColumnSpan="5"
+                                       Margin="10,0,0,0"
+                                       VerticalAlignment="Center"
+                                       TextWrapping="Wrap"/>
+
+                            <TextBlock Grid.Column="0"
+                                       Grid.Row="1"
+                                       Text="Profile"
+                                       Margin="0,10,6,0"
+                                       VerticalAlignment="Center"/>
+                            <ComboBox x:Name="WheelProfileComboBox"
+                                      Grid.Column="1"
+                                      Grid.Row="1"
+                                      Margin="0,8,12,0"
+                                      SelectionChanged="WheelProfileComboBox_SelectionChanged"/>
+                            <TextBlock Grid.Column="2"
+                                       Grid.Row="1"
+                                       Text="vJoy ID"
+                                       Margin="0,10,6,0"
+                                       VerticalAlignment="Center"/>
+                            <ComboBox x:Name="WheelProfileVJoyIdComboBox"
+                                      Grid.Column="3"
+                                      Grid.Row="1"
+                                      Width="64"
+                                      Margin="0,8,12,0"/>
+                            <Button Grid.Column="4"
+                                    Grid.Row="1"
+                                    Content="Apply"
+                                    Padding="14,5"
+                                    Margin="0,8,8,0"
+                                    Click="ApplyWheelProfileButton_Click"/>
+                            <Button Grid.Column="5"
+                                    Grid.Row="1"
+                                    Content="Remove"
+                                    Padding="14,5"
+                                    Margin="0,8,0,0"
+                                    Click="RemoveWheelProfileButton_Click"/>
+                        </Grid>
+
+                        <TextBlock x:Name="WheelProfileWarningText"
+                                   Foreground="#9A3412"
+                                   Margin="0,0,0,6"
+                                   TextWrapping="Wrap"/>
+                        <TextBox x:Name="WheelProfilesBox"
+                                 Style="{StaticResource MonoBox}"
+                                 MinHeight="110"/>
+
+                        <TextBlock Text="Live Button Tester" Style="{StaticResource SectionHeader}"/>
+                        <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                                      VerticalScrollBarVisibility="Auto"
+                                      MaxHeight="260">
+                            <UniformGrid x:Name="ButtonTesterGrid"
+                                         Columns="8"
+                                         Margin="0,0,0,4"/>
+                        </ScrollViewer>
+
+                        <TextBlock Text="Devices" Style="{StaticResource SectionHeader}" Margin="0,0,0,8"/>
+                        <TextBox x:Name="WheelDevicesBox"
+                                 Style="{StaticResource MonoBox}"
+                                 MinHeight="112"/>
+
+                        <TextBlock Text="Wheel" Style="{StaticResource SectionHeader}"/>
+                        <TextBox x:Name="WheelInfoBox"
+                                 Style="{StaticResource MonoBox}"
+                                 MinHeight="220"/>
+
+                        <TextBlock Text="Live HID" Style="{StaticResource SectionHeader}"/>
+                        <TextBox x:Name="HidInfoBox"
+                                 Style="{StaticResource MonoBox}"
+                                 MinHeight="180"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Diagnostics">
+                <Grid Margin="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="2*"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Margin="0,0,0,8">
+                        <StackPanel Orientation="Horizontal">
+                            <Button Content="Copy diagnostics" Padding="14,5"
+                                    Click="CopyDiagnosticsButton_Click"/>
+                            <Button Content="Copy debug logs" Padding="14,5" Margin="8,0,0,0"
+                                    Click="CopyLogsButton_Click"/>
+                            <Button Content="Copy support bundle" Padding="14,5" Margin="8,0,0,0"
+                                    Click="CopySupportBundleButton_Click"/>
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                            <CheckBox x:Name="EnableVJoySourceBridgeCheckBox"
+                                      Content="Enable vJoy source bridge"
+                                      VerticalAlignment="Center"
+                                      Checked="EnableVJoySourceBridgeCheckBox_Changed"
+                                      Unchecked="EnableVJoySourceBridgeCheckBox_Changed"/>
+                            <CheckBox x:Name="UsePerWheelVJoySourceDevicesCheckBox"
+                                      Content="Per-wheel IDs"
+                                      Margin="18,0,0,0"
+                                      VerticalAlignment="Center"
+                                      Checked="UsePerWheelVJoySourceDevicesCheckBox_Changed"
+                                      Unchecked="UsePerWheelVJoySourceDevicesCheckBox_Changed"/>
+                            <TextBlock Text="Fallback ID" Margin="18,0,6,0" VerticalAlignment="Center"/>
+                            <ComboBox x:Name="VJoySourceIdComboBox"
+                                      Width="64"
+                                      SelectionChanged="VJoySourceIdComboBox_SelectionChanged"/>
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                            <TextBlock x:Name="CurrentWheelAssignmentText"
+                                       VerticalAlignment="Center"/>
+                            <TextBlock Text="Current wheel ID" Margin="18,0,6,0" VerticalAlignment="Center"/>
+                            <ComboBox x:Name="CurrentWheelVJoyIdComboBox"
+                                      Width="64"
+                                      SelectionChanged="CurrentWheelVJoyIdComboBox_SelectionChanged"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <TextBox x:Name="DiagnosticsBox"
+                             Grid.Row="1"
+                             Style="{StaticResource MonoBox}"/>
+
+                    <TextBlock Grid.Row="2"
+                               Text="Debug logs"
+                               Style="{StaticResource SectionHeader}"
+                               Margin="0,12,0,8"/>
+
+                    <StackPanel Grid.Row="2"
+                                Orientation="Horizontal"
+                                HorizontalAlignment="Right"
+                                Margin="0,12,0,8">
+                        <TextBlock Text="Filter" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <ComboBox x:Name="LogFilterComboBox"
+                                  Width="100"
+                                  SelectionChanged="LogFilterComboBox_SelectionChanged"/>
+                    </StackPanel>
+
+                    <TextBox x:Name="LogsBox"
+                             Grid.Row="3"
+                             Style="{StaticResource MonoBox}"/>
+
+                    <TextBlock Grid.Row="4"
+                               Text="Recent button events"
+                               Style="{StaticResource SectionHeader}"
+                               Margin="0,12,0,8"/>
+
+                    <TextBox x:Name="ButtonEventsBox"
+                             Grid.Row="5"
+                             Style="{StaticResource MonoBox}"
+                             MinHeight="88"/>
+                </Grid>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
+</UserControl>

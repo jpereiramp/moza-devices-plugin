@@ -1,0 +1,82 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <PlatformTarget>x86</PlatformTarget>
+    <OutputType>Library</OutputType>
+    <RootNamespace>MozaDevicesPlugin</RootNamespace>
+    <AssemblyName>MozaDevicesPlugin</AssemblyName>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <Version>0.1.0</Version>
+    <AssemblyTitle>MozaDevicesPlugin</AssemblyTitle>
+    <Description>SimHub plugin for MOZA devices using the MOZA SDK</Description>
+    <Product>MozaDevicesPlugin</Product>
+    <Copyright>Copyright 2026</Copyright>
+    <UseWPF>true</UseWPF>
+    <ImportWindowsDesktopTargets>true</ImportWindowsDesktopTargets>
+    <Platform Condition="'$(Platform)' == '' or '$(Platform)' == 'AnyCPU'">x86</Platform>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="MOZA_SDK\**\*.cs" />
+    <None Remove="MOZA_SDK\**" />
+    <EmbeddedResource Remove="MOZA_SDK\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="SimHub.Plugins">
+      <HintPath>libs\SimHub\SimHub.Plugins.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="GameReaderCommon">
+      <HintPath>libs\SimHub\GameReaderCommon.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SimHub.Logging">
+      <HintPath>libs\SimHub\SimHub.Logging.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>libs\SimHub\Newtonsoft.Json.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="MOZA_API_CSharp">
+      <HintPath>libs\MOZA_SDK\MOZA_API_CSharp.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="System.Windows.Forms" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="libs\MOZA_SDK\MOZA_API_C.dll">
+      <Link>MOZA_API_C.dll</Link>
+      <TargetPath>MOZA_API_C.dll</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="libs\MOZA_SDK\MOZA_SDK.dll">
+      <Link>MOZA_SDK.dll</Link>
+      <TargetPath>MOZA_SDK.dll</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net48" Version="1.0.3">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <Target Name="CopyToSimHub" AfterTargets="Build" Condition="'$(SIMHUB_PATH)' != ''">
+    <ItemGroup>
+      <MozaDeployFiles Include="$(OutputPath)$(AssemblyName).dll" />
+      <MozaDeployFiles Include="$(OutputPath)MOZA_API_CSharp.dll" />
+      <MozaDeployFiles Include="$(OutputPath)MOZA_API_C.dll" />
+      <MozaDeployFiles Include="$(OutputPath)MOZA_SDK.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(MozaDeployFiles)" DestinationFolder="$(SIMHUB_PATH)" SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

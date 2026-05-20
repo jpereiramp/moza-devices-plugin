@@ -1,0 +1,27 @@
+# Build output
+bin/
+obj/
+TestResults/
+
+# IDE/user files
+.vs/
+*.user
+*.suo
+*.rsuser
+
+# Local dependency cache. These assemblies come from installed SimHub and the
+# MOZA SDK and should not be redistributed from this repository.
+libs/**/*.dll
+libs/**/*.pdb
+libs/**/*.xml
+!libs/**/
+!libs/README.md
+
+# Full extracted vendor SDK/packages
+/MOZA_SDK/
+*.zip
+*.7z
+*.rar
+
+# Runtime/generated files
+*.log
