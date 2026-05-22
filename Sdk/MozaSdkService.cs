@@ -13,6 +13,9 @@ namespace MozaDevicesPlugin.Sdk
 {
     internal sealed class MozaSdkService : IDisposable
     {
+        private static readonly TimeSpan TransitionPollInterval = TimeSpan.FromSeconds(2);
+        private static readonly TimeSpan StablePollInterval = TimeSpan.FromSeconds(10);
+
         private readonly DiagnosticsLog _log;
         private readonly AutoResetEvent _refreshRequested = new AutoResetEvent(false);
         private readonly object _lifecycleSync = new object();
@@ -23,11 +26,13 @@ namespace MozaDevicesPlugin.Sdk
         private volatile MozaDeviceSnapshot _snapshot = MozaDeviceSnapshot.Empty;
         private MozaDeviceParentSnapshot _lastParents = MozaDeviceParentSnapshot.Empty;
         private MozaWheelSnapshot _lastWheel = MozaWheelSnapshot.Empty;
-        private MozaSdkCallResult[] _lastDeviceCalls = new MozaSdkCallResult[0];
+        private MozaSdkCallResult[] _lastParentCalls = new MozaSdkCallResult[0];
+        private MozaSdkCallResult[] _lastWheelCalls = new MozaSdkCallResult[0];
         private bool _sdkInstalled;
         private bool _disposed;
         private long _pollCount;
         private int _consecutiveFailures;
+        private int _stableIdentityPolls;
         private string _lastLoggedStatus = "";
         private string _lastLoggedDevices = "";
 
@@ -130,14 +135,29 @@ namespace MozaDevicesPlugin.Sdk
         private void WorkerLoop(CancellationToken token)
         {
             TryInstallSdk();
-            PollOnce(pollDevices: true);
+            PollOnce(forceWheelConfigurationRefresh: true);
+            DateTime nextPollUtc = DateTime.UtcNow.Add(GetNextPollInterval());
 
             while (!token.IsCancellationRequested)
             {
+                int timeout = GetWaitTimeoutMilliseconds(nextPollUtc);
                 int waitResult = WaitHandle.WaitAny(
-                    new[] { token.WaitHandle, _refreshRequested });
+                    new[] { token.WaitHandle, _refreshRequested },
+                    timeout);
+
+                if (waitResult == 0)
+                    break;
+
                 if (waitResult == 1)
-                    PollOnce(pollDevices: true);
+                {
+                    PollOnce(forceWheelConfigurationRefresh: true);
+                }
+                else if (waitResult == WaitHandle.WaitTimeout)
+                {
+                    PollOnce(forceWheelConfigurationRefresh: false);
+                }
+
+                nextPollUtc = DateTime.UtcNow.Add(GetNextPollInterval());
             }
 
             TryRemoveSdk();
@@ -154,6 +174,29 @@ namespace MozaDevicesPlugin.Sdk
                 hid: _snapshot.Hid,
                 calls: _snapshot.Calls);
             _log.Info("MOZA SDK poller stopped");
+        }
+
+        private TimeSpan GetNextPollInterval()
+        {
+            MozaDeviceSnapshot snapshot = _snapshot;
+            if (snapshot.ConsecutiveFailures > 0
+                || !snapshot.Parents.AnyConnected
+                || _stableIdentityPolls < 2)
+            {
+                return TransitionPollInterval;
+            }
+
+            return StablePollInterval;
+        }
+
+        private static int GetWaitTimeoutMilliseconds(DateTime nextPollUtc)
+        {
+            TimeSpan delay = nextPollUtc - DateTime.UtcNow;
+            if (delay <= TimeSpan.Zero)
+                return 0;
+
+            double milliseconds = delay.TotalMilliseconds;
+            return milliseconds >= int.MaxValue ? int.MaxValue : Math.Max(1, (int)milliseconds);
         }
 
         private void TryInstallSdk()
@@ -207,7 +250,7 @@ namespace MozaDevicesPlugin.Sdk
             }
         }
 
-        private void PollOnce(bool pollDevices)
+        private void PollOnce(bool forceWheelConfigurationRefresh)
         {
             if (!_sdkInstalled)
                 return;
@@ -217,39 +260,42 @@ namespace MozaDevicesPlugin.Sdk
 
             try
             {
-                MozaDeviceParentSnapshot parents = _lastParents;
-                MozaWheelSnapshot wheel = _lastWheel;
+                string previousIdentity = BuildIdentitySignature(_lastParents);
+                string previousWheel = _lastParents.SteeringWheel;
+                var parentCalls = new List<MozaSdkCallResult>();
+                MozaDeviceParentSnapshot parents = PollParents(parentCalls);
+                bool identityChanged = !string.Equals(previousIdentity, BuildIdentitySignature(parents), StringComparison.Ordinal);
+                bool steeringWheelChanged = !string.Equals(previousWheel, parents.SteeringWheel, StringComparison.Ordinal);
+                bool refreshWheelConfiguration = forceWheelConfigurationRefresh || steeringWheelChanged;
+                var wheelCalls = new List<MozaSdkCallResult>();
+                MozaWheelSnapshot wheel;
 
-                if (pollDevices)
+                if (string.IsNullOrWhiteSpace(parents.SteeringWheel))
                 {
-                    var deviceCalls = new List<MozaSdkCallResult>();
-                    parents = new MozaDeviceParentSnapshot(
-                        wheelbase: GetDeviceParent("Wheelbase", MozaProductType.PRODUCT_WHEELBASE, deviceCalls),
-                        steeringWheel: GetDeviceParent("Steering wheel", MozaProductType.PRODUCT_STEERINGWHEEL, deviceCalls),
-                        displayScreen: GetDeviceParent("Display screen", MozaProductType.PRODUCT_DISPLAYSCREEN, deviceCalls),
-                        pedals: GetDeviceParent("Pedals", MozaProductType.PRODUCT_PEDALS, deviceCalls),
-                        handbrake: GetDeviceParent("Handbrake", MozaProductType.PRODUCT_HANDBRAKE, deviceCalls),
-                        gearShifter: GetDeviceParent("Gear shifter", MozaProductType.PRODUCT_GEARSHIFTER, deviceCalls, optional: true),
-                        adapter: GetDeviceParent("Adapter", MozaProductType.PRODUCT_ADAPTER, deviceCalls, optional: true),
-                        meter: GetDeviceParent("Meter", MozaProductType.PRODUCT_METER, deviceCalls, optional: true));
-
-                    wheel = !string.IsNullOrWhiteSpace(parents.SteeringWheel)
-                        ? PollWheel(deviceCalls)
-                        : MozaWheelSnapshot.Empty;
-
-                    _lastParents = parents;
-                    _lastWheel = wheel;
-                    _lastDeviceCalls = deviceCalls.ToArray();
-                    calls.AddRange(deviceCalls);
+                    wheel = MozaWheelSnapshot.Empty;
+                    _lastWheelCalls = new MozaSdkCallResult[0];
+                }
+                else if (refreshWheelConfiguration)
+                {
+                    wheel = PollWheel(wheelCalls);
+                    _lastWheelCalls = wheelCalls.ToArray();
                 }
                 else
                 {
-                    calls.AddRange(_lastDeviceCalls);
+                    wheel = _lastWheel;
+                    wheelCalls.AddRange(_lastWheelCalls);
                 }
+
+                _lastParents = parents;
+                _lastWheel = wheel;
+                _lastParentCalls = parentCalls.ToArray();
+                calls.AddRange(_lastParentCalls);
+                calls.AddRange(wheelCalls);
 
                 MozaHidSnapshot hid = CreateUnavailableHidSnapshot(HidPollingStatus);
 
                 _consecutiveFailures = 0;
+                _stableIdentityPolls = identityChanged ? 0 : IncrementStableIdentityPolls(_stableIdentityPolls);
                 string status = BuildStatus(parents, calls);
                 string lastError = FindLastError(calls);
 
@@ -272,6 +318,7 @@ namespace MozaDevicesPlugin.Sdk
             catch (Exception ex)
             {
                 _consecutiveFailures++;
+                _stableIdentityPolls = 0;
                 _log.Error("MOZA SDK poll failed", ex);
 
                 _snapshot = new MozaDeviceSnapshot(
@@ -287,6 +334,38 @@ namespace MozaDevicesPlugin.Sdk
                     hid: _snapshot.Hid,
                     calls: calls);
             }
+        }
+
+        private MozaDeviceParentSnapshot PollParents(ICollection<MozaSdkCallResult> calls)
+        {
+            return new MozaDeviceParentSnapshot(
+                wheelbase: GetDeviceParent("Wheelbase", MozaProductType.PRODUCT_WHEELBASE, calls),
+                steeringWheel: GetDeviceParent("Steering wheel", MozaProductType.PRODUCT_STEERINGWHEEL, calls),
+                displayScreen: GetDeviceParent("Display screen", MozaProductType.PRODUCT_DISPLAYSCREEN, calls),
+                pedals: GetDeviceParent("Pedals", MozaProductType.PRODUCT_PEDALS, calls),
+                handbrake: GetDeviceParent("Handbrake", MozaProductType.PRODUCT_HANDBRAKE, calls),
+                gearShifter: GetDeviceParent("Gear shifter", MozaProductType.PRODUCT_GEARSHIFTER, calls, optional: true),
+                adapter: GetDeviceParent("Adapter", MozaProductType.PRODUCT_ADAPTER, calls, optional: true),
+                meter: GetDeviceParent("Meter", MozaProductType.PRODUCT_METER, calls, optional: true));
+        }
+
+        private static string BuildIdentitySignature(MozaDeviceParentSnapshot parents)
+        {
+            return string.Join(
+                "\u001f",
+                parents.Wheelbase,
+                parents.SteeringWheel,
+                parents.DisplayScreen,
+                parents.Pedals,
+                parents.Handbrake,
+                parents.GearShifter,
+                parents.Adapter,
+                parents.Meter);
+        }
+
+        private static int IncrementStableIdentityPolls(int value)
+        {
+            return value == int.MaxValue ? value : value + 1;
         }
 
         private static string BuildStatus(MozaDeviceParentSnapshot parents, IReadOnlyList<MozaSdkCallResult> calls)

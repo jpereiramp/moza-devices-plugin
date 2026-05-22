@@ -29,14 +29,14 @@ Background service for MOZA SDK identity/configuration reads.
 
 - Loads and initializes the SDK.
 - Reads device parent names, such as wheelbase, steering wheel, display,
-  pedals, handbrake, and shifter, at startup and when the user requests a
-  refresh.
-- Reads wheel settings available through SDK getter calls at startup and on
-  refresh.
+  pedals, handbrake, and shifter, at startup, on manual refresh, and on an
+  adaptive background identity poll.
+- Reads wheel settings available through SDK getter calls at startup, on manual
+  refresh, and when the steering wheel identity changes.
 - Does not poll SDK HID data.
-- Avoids continuous SDK polling. If a wheel rim is changed while SimHub is
-  running, the user should press Refresh in the plugin settings to recapture SDK
-  identity/configuration.
+- Avoids continuous SDK HID/configuration polling. The lightweight identity
+  poll runs more often while devices are changing or unavailable, then relaxes
+  once the same SDK identity has been observed repeatedly.
 
 ### `DirectInputButtonReader`
 
@@ -117,7 +117,7 @@ throttles failed acquire attempts, and caches settings-page inspection results.
 
 1. SimHub loads `MozaDevicesPlugin.dll`.
 2. The plugin starts `MozaSdkService`.
-3. The SDK service initializes the MOZA SDK and captures identity/configuration once.
+3. The SDK service initializes the MOZA SDK and starts adaptive identity polling.
 4. Once a wheel identity is available, `DeviceDefinitionDeployer` writes or
    updates the generated SimHub `device.json`.
 5. After a SimHub restart, SimHub loads the generated wheel definition.
@@ -143,6 +143,11 @@ when a counter changes.
 vJoy device status is not polled every update. Once a vJoy source device is
 acquired, button writes continue without re-running status discovery unless the
 source wheel or target vJoy assignment changes.
+
+MOZA SDK identity is polled separately from vJoy. Parent device names are read
+on an adaptive schedule so base/wheel connect, disconnect, and rim swaps are
+noticed without pressing Refresh. Wheel configuration getters are only refreshed
+at startup, on manual Refresh, or when the reported steering wheel changes.
 
 ## Leak Investigation Findings
 

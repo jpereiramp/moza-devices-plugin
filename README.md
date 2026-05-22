@@ -13,8 +13,8 @@ MOZA SDK HID polling is intentionally disabled. The plugin must not call
 
 ## What It Does
 
-- Detects MOZA devices reported by the MOZA SDK and Pit House at startup and
-  when refreshed.
+- Detects MOZA devices reported by the MOZA SDK and Pit House at startup, when
+  refreshed, and through adaptive background identity polling.
 - Creates SimHub user device definitions for detected MOZA wheels, such as
   `MOZA SDK W17` and `MOZA SDK W18`.
 - Adds a MOZA SDK page to those generated wheel devices only.
@@ -38,8 +38,8 @@ MOZA SDK HID polling is intentionally disabled. The plugin must not call
   samples.
 - vJoy status APIs are cached/throttled because repeated status inspection can
   leak native handles through the vJoy wrapper.
-- Wheel identity is captured from the MOZA SDK at startup and manual refresh.
-  Use Refresh in the plugin settings after swapping rims while SimHub is running.
+- Wheel identity is refreshed automatically on an adaptive SDK identity poll;
+  manual Refresh still forces an immediate full SDK read.
 - Fine-grained wheel LED control is not exposed. SimHub LED pages are disabled
   for generated MOZA SDK wheel definitions.
 
